@@ -12,35 +12,33 @@
 
 #define SIZE_Data 100
 
-int dato = 0;
 uint8_t data[100];
-unsigned int i = 0;
-//uint8_t eUSCIA0_UART_availableData = 0;
+unsigned int i = 0; //Contador de interupciones de recepción
 
 void eUSCIA0_UART_send(int data_Tx){
     while((UCA0STATW & UCBUSY) == UCBUSY){}
     UCA0TXBUF = data_Tx; //Dato a enviar (pag.791) manual slau367p.pdf
 }
 
-/*
-int eUSCIA1_UART_receiveACK_eerase(){
-    while(eUSCIA0_UART_availableData == 0){}
-        eUSCIA0_UART_data = UCA0RXBUF & 0xFF; //Byte recibido en el registro
-                                              //de desplazamiento (pag.791) manual slau367p.pdf
-    eUSCIA0_UART_availableData = 0;
-    return eUSCIA0_UART_data;
-}*/
+void P4_PushButton_Init(){
+    P4DIR &= ~BIT5; //habilita pin P4.2 como entrada digital
+    P4REN |= BIT5; //Habilita resistencia de pull up o pulldown
+    P4OUT |= BIT5; //Lo configura como pull up  //Logica positiva
+    P4IES &= ~BIT5; //la bandera de interrupcion se activa con flanco positivo.
+    P4IE |= BIT5;   //Activa la interrupciï¿½n en P4.2
+    P4IFG = 0;
+    _enable_interrupt();
+}
 
-int main(void)
-{
-	WDTCTL = WDTPW | WDTHOLD;
-
+void MSP430_Clk_Config(){
     CSCTL0_H = CSKEY >> 8;
     CSCTL1 = DCOFSEL_0 | DCORSEL;
     CSCTL2 = SELA__VLOCLK | SELS__DCOCLK | SELM__DCOCLK;
     CSCTL3 = DIVA__1 | DIVS__1 | DIVM__1;
     CSCTL0_H = 0;
+}
 
+void eUSCIA1__UART_Init(){
     UCA0CTLW0 |= UCSWRST;
     UCA0CTLW0 |= UCSSEL__SMCLK;
     UCA0BRW |= 6;
@@ -61,33 +59,24 @@ int main(void)
     UCA0IE |= UCRXIE;                           //Habilita interrupción de recepción
                       //Habilita la las interrupciones enmascarables
     UCA0IFG &= ~UCRXIFG;
-
-    //Configuracion del LED
-    P1DIR |= BIT0;
-
-    P4DIR &= ~BIT5; //habilita pin P4.2 como entrada digital
-    P4REN |= BIT5; //Habilita resistencia de pull up o pulldown
-    P4OUT |= BIT5; //Lo configura como pull up  //Logica positiva
-    P4IES &= ~BIT5; //la bandera de interrupcion se activa con flanco positivo.
-    P4IE |= BIT5;   //Activa la interrupciï¿½n en P4.2
-    P4IFG = 0;
-
     _enable_interrupt();
+}
 
-    char message[] = "Hello world \n";
-    int position;
-    int j;
+void LED_TurnOn(){
+    P1DIR |= BIT0;
+}
+
+int main(void)
+{
+	WDTCTL = WDTPW | WDTHOLD;
+	MSP430_Clk_Config();
+	eUSCIA1__UART_Init();
+	P4_PushButton_Init();
+	LED_TurnOn();
 
     while(1){
-        for (position = 0; position < sizeof(message); position++) {
-            //eUSCIA0_UART_send(message[position]);
-        }
-        eUSCIA0_UART_send(0x04);
-        for (j = 0; j < 30000; j++) {}
-        for (j = 0; j < 30000; j++) {}
-        //P1DIR ^= BIT0;
-    }
 
+    }
 	
 	return 0;
 }
@@ -96,8 +85,7 @@ int main(void)
 #pragma vector = USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void){
     UCA0IFG = 0;
-    P1OUT ^= BIT0;                            //limpia bandera de interrupcion pendiente(pag. 813) slau367.pdf;
-    //dato = UCA0RXBUF;
+    P1OUT ^= BIT0;  //limpia bandera de interrupcion pendiente(pag. 813) slau367.pdf;
     data[i] = UCA0RXBUF;
     i++;
 }
@@ -106,5 +94,5 @@ __interrupt void USCI_A0_ISR(void){
 #pragma vector = PORT4_VECTOR
 __interrupt void PORT4_ISR(void){
     P4IFG = 0; //limpia bandera de interrupcion
-    //P1OUT ^= BIT0;
+    P1OUT ^= BIT0;
 }
