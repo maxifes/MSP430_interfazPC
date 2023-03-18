@@ -2,6 +2,8 @@
 #include <stdint.h>
 
 
+//Git branch for development
+
 //Configura UART
 //- 8 bits de datos.
 //- Sin bit de paridad.
