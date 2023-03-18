@@ -2,6 +2,10 @@
 #include <stdint.h>
 
 
+/*
+ *
+ * */
+
 //Configura UART
 //- 8 bits de datos.
 //- Sin bit de paridad.
@@ -13,21 +17,23 @@
 int dato = 0;
 uint8_t data[100];
 unsigned int i = 0;
-//uint8_t eUSCIA0_UART_availableData = 0;
+uint8_t eUSCIA0_UART_availableData = 0;
+uint8_t byteInicio = 0x0F;
+
 
 void eUSCIA0_UART_send(int data_Tx){
     while((UCA0STATW & UCBUSY) == UCBUSY){}
     UCA0TXBUF = data_Tx; //Dato a enviar (pag.791) manual slau367p.pdf
 }
 
-/*
-int eUSCIA1_UART_receiveACK_eerase(){
+
+int eUSCIA0_UART_receiveACK_eerase(){
+    uint8_t eUSCIA0_UART_data = 0;
     while(eUSCIA0_UART_availableData == 0){}
-        eUSCIA0_UART_data = UCA0RXBUF & 0xFF; //Byte recibido en el registro
-                                              //de desplazamiento (pag.791) manual slau367p.pdf
+        eUSCIA0_UART_data = UCA0RXBUF & 0xFF; //Byte recibido en el registro                                              //de desplazamiento (pag.791) manual slau367p.pdf
     eUSCIA0_UART_availableData = 0;
     return eUSCIA0_UART_data;
-}*/
+}
 
 int main(void)
 {
@@ -93,9 +99,8 @@ int main(void)
 
 #pragma vector = USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void){
-    UCA0IFG = 0;
-    P1OUT ^= BIT0;                            //limpia bandera de interrupcion pendiente(pag. 813) slau367.pdf;
-    //dato = UCA0RXBUF;
+    UCA0IFG = 0; //limpia bandera de interrupcion pendiente(pag. 813) slau367.pdf;
+    P1OUT ^= BIT0;
     data[i] = UCA0RXBUF;
     i++;
 }
