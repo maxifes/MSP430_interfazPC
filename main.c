@@ -3,6 +3,14 @@
 
 
 //Git branch for development
+/*
+ * Comprueba byte de incio
+ * Si es correcto, envia byte de ACK y procede a recibir bytes de datos
+ * Calcula checksum y lo compara con el recibido. Si es correcto envia ACK
+ * Si es incorrecto envia NACK
+ * Nota: Si el dispositivo externo no envía los bytes completos, la funcion de
+ * reprogramación se corrompe (falta arreglar esto) (Timeout?)
+ * */
 
 //Configura UART
 //- 8 bits de datos.
@@ -10,10 +18,27 @@
 //- 1 bit de stop.
 //- 9600 baudrate.
 
-#define SIZE_Data 100
+/*
+ * Trama recibida desde el dispositivo externo
+ * data[0] - Numero de bytes de datos
+ * dato[1] - Address MSB (Sin offset)
+ * dato[2] - Address LSB (Sin offset)
+ * dato[3] - Primer dato
+ * dato[3+data[0]] - dato n (dato final)
+ * dato[4+data[0]] - dato n (checksum)
+ * */
 
-uint8_t data[100];
-unsigned int i = 0; //Contador de interupciones de recepción
+#define SIZE_DATA 100
+#define START_BYTE 0xF
+#define END_BYTE 0xF0
+#define ACK_BYTE 0x79
+#define NACK_BYTE 0x7F
+
+
+uint8_t data[SIZE_DATA];
+unsigned int count_reprog_data = 0;
+unsigned int reprog_start_condition = 0;
+uint8_t reprog_checksum = 0;
 
 void eUSCIA0_UART_send(int data_Tx){
     while((UCA0STATW & UCBUSY) == UCBUSY){}
@@ -62,8 +87,20 @@ void eUSCIA1__UART_Init(){
     _enable_interrupt();
 }
 
-void LED_TurnOn(){
+void LED_Init(){
     P1DIR |= BIT0;
+}
+
+void LED_TurnOn(){
+    P1OUT |= BIT0;
+}
+
+void LED_TurnOff(){
+    P1OUT &= ~BIT0;
+}
+
+void LED_Toggle(){
+    P1OUT ^= BIT0;
 }
 
 int main(void)
@@ -72,6 +109,7 @@ int main(void)
 	MSP430_Clk_Config();
 	eUSCIA1__UART_Init();
 	P4_PushButton_Init();
+	LED_Init();
 	LED_TurnOn();
 
     while(1){
@@ -85,9 +123,36 @@ int main(void)
 #pragma vector = USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void){
     UCA0IFG = 0;
-    P1OUT ^= BIT0;  //limpia bandera de interrupcion pendiente(pag. 813) slau367.pdf;
-    data[i] = UCA0RXBUF;
-    i++;
+    int start_byte_received = 0;
+    int i = 0;
+
+    if(reprog_start_condition == 0){ //¿Es una nueva trama?
+        start_byte_received = UCA0RXBUF;
+        if(start_byte_received == START_BYTE){
+           reprog_start_condition = 1;
+           P1OUT ^= BIT0;
+           UCA0TXBUF = ACK_BYTE; //Dato a enviar (pag.791) manual slau367p.pdf
+        }else{
+            reprog_start_condition = 0;
+            UCA0TXBUF = NACK_BYTE; //Dato a enviar (pag.791) manual slau367p.pdf
+        }
+    }else{
+        data[count_reprog_data] = UCA0RXBUF;
+        count_reprog_data++;
+        P1OUT ^= BIT0;
+
+        if(count_reprog_data == 4 + data[0]){
+            for(i = 0; i<= data[0]+3; i++){
+                reprog_checksum ^=  data[i];
+            }
+            if(reprog_checksum == data[count_reprog_data]){
+                UCA0TXBUF = ACK_BYTE;
+            }else{
+                UCA0TXBUF = NACK_BYTE;
+            }
+            count_reprog_data = 0;
+        }
+    }
 }
 
 
