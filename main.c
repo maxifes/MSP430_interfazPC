@@ -28,18 +28,18 @@
  * dato[4+data[0]] - dato n (checksum)
  * */
 
-#define SIZE_DATA 100
+#define SIZE_BUFFER 100
 #define START_BYTE 0xF
 #define END_BYTE 0xF0
 #define ACK_BYTE 0x79
 #define NACK_BYTE 0x7F
 
 
-uint8_t data[SIZE_DATA];
-unsigned int count_reprog_data = 0;
-uint8_t first_byte = 1;
-uint8_t reprog_master_enable = 0;
-uint8_t reprog_frame_ready = 0;
+uint8_t update_Code_Buffer[SIZE_BUFFER];
+uint8_t update_Code_Byte_Count = 0;
+uint8_t update_Code_first_Byte = 1;
+uint8_t update_Code_enable = 0;
+uint8_t update_Code_frame_ready = 0;
 
 uint8_t frame_1[25] = {0};
 uint8_t frame_2[25] = {0};
@@ -47,22 +47,9 @@ uint8_t frame_3[25] = {0};
 uint8_t frame_4[25] = {0};
 uint8_t frame_5[25] = {0};
 
-uint8_t bandera = 0;
-
-
 void eUSCIA0_UART_send(int data_Tx){
     while((UCA0STATW & UCBUSY) == UCBUSY){}
     UCA0TXBUF = data_Tx; //Dato a enviar (pag.791) manual slau367p.pdf
-}
-
-void P4_PushButton_Init(){
-    P4DIR &= ~BIT5; //habilita pin P4.2 como entrada digital
-    P4REN |= BIT5; //Habilita resistencia de pull up o pulldown
-    P4OUT |= BIT5; //Lo configura como pull up  //Logica positiva
-    P4IES &= ~BIT5; //la bandera de interrupcion se activa con flanco positivo.
-    P4IE |= BIT5;   //Activa la interrupciï¿½n en P4.2
-    P4IFG = 0;
-    _enable_interrupt();
 }
 
 void MSP430_Clk_Config(){
@@ -73,17 +60,11 @@ void MSP430_Clk_Config(){
     CSCTL0_H = 0;
 }
 
-void eUSCIA1__UART_Init(){
+void eUSCIA0__UART_Init(){
     UCA0CTLW0 |= UCSWRST;
     UCA0CTLW0 |= UCSSEL__SMCLK;
     UCA0BRW |= 6;
     UCA0MCTLW |= 0x20<<8 | UCOS16 | 8<<4;
-
-    //Para 115200 bauds
-    //bit rate
-    //UCA0BRW = 8;
-    //UCA0MCTLW |= 0xD600;
-
 
     P2SEL0 &= ~(BIT0 | BIT1);                   //P2SEL0.x = 0
     P2SEL1 |= BIT0 | BIT1;                      //P2SEL1.x = 1; Selecciona la función de UART en P2.1 y P2.0
@@ -133,34 +114,34 @@ void Split_Vector(uint8_t ready_frames_count){
     switch (ready_frames_count) {
         case 1:
             for(i = 0;i <= 25; i++){
-                frame_1[i] = data[i];
+                frame_1[i] = update_Code_Buffer[i];
             }
             break;
         case 2:
             for(i = 0;i <= 25; i++){
-                frame_2[i] = data[i];
+                frame_2[i] = update_Code_Buffer[i];
             }
             break;
         case 3:
             for(i = 0;i <= 25; i++){
-                frame_3[i] = data[i];
+                frame_3[i] = update_Code_Buffer[i];
             }
             break;
         case 4:
             for(i = 0;i <= 25; i++){
-                frame_4[i] = data[i];
+                frame_4[i] = update_Code_Buffer[i];
             }
             break;
         case 5:
             for(i = 0;i <= 25; i++){
-                frame_5[i] = data[i];
+                frame_5[i] = update_Code_Buffer[i];
             }
             break;
         default:
             break;
     }
     for(i = 0;i <= 25; i++){
-       data[i] = 0;
+        update_Code_Buffer[i] = 0;
     }
 }
 
@@ -170,23 +151,37 @@ int main(void)
 
 	WDTCTL = WDTPW | WDTHOLD;
 	MSP430_Clk_Config();
-	eUSCIA1__UART_Init();
-	P4_PushButton_Init();
+	eUSCIA0__UART_Init();
 	LED_Init();
 	LED_TurnOn();
 
     while(1){
-        if(reprog_master_enable == 1){
-            if(reprog_frame_ready == 1){
-                if(Frame_Verify_Checksum(data) == 1){
+        if(update_Code_enable == 1){
+            if(update_Code_frame_ready == 1){
+                if(Frame_Verify_Checksum(update_Code_Buffer) == 1){
                     ready_frames_count++;
                     Split_Vector(ready_frames_count);
-                    UCA0TXBUF = ACK_BYTE;
+
+                    /*
+                     * Aca va la funcion para la escritura en la FRAM
+                     * **********************************************
+                     * **********************************************
+                     * **********************************************
+                     * El dispositivo externo envía los datos con el siguiente orden
+                     * update_Code_Buffer[0] - Numero de bytes de datos
+                     * update_Code_Buffer[1] - Address MSB (Sin offset)
+                     * update_Code_Buffer[2] - Address LSB (Sin offset)
+                     * update_Code_Buffer[3] - Primer dato
+                     * update_Code_Buffer[3+data[0]] - dato n (dato final)
+                     * update_Code_Buffer[4+data[0]] - dato n (checksum)
+                     *
+                     * */
+                    eUSCIA0_UART_send(ACK_BYTE);
                 }else{
-                    UCA0TXBUF = NACK_BYTE;
+                    eUSCIA0_UART_send(NACK_BYTE);
                 }
-                P1OUT ^= BIT0;
-                reprog_frame_ready = 0;
+                LED_Toggle();
+                update_Code_frame_ready = 0;
             }
         }else{
             ready_frames_count = 0;
@@ -200,45 +195,32 @@ int main(void)
 #pragma vector = USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void){
     UCA0IFG = 0;
-    reprog_frame_ready = 0;
+    update_Code_frame_ready = 0;
     int start_byte_received = 0;
 
-    if(first_byte == 1){ //¿Es una nueva trama?
+    if(update_Code_first_Byte == 1){ //¿Es una nueva trama?
         start_byte_received = UCA0RXBUF;
         if(start_byte_received == START_BYTE){
-           first_byte = 0;
+           update_Code_first_Byte = 0;
            P1OUT ^= BIT0;
            UCA0TXBUF = ACK_BYTE; //Dato a enviar (pag.791) manual slau367p.pdf
-           reprog_master_enable = 1; //Habilita programacion
+           update_Code_enable = 1; //Habilita programacion
         }else if(start_byte_received == END_BYTE){
-           first_byte = 1;
+           update_Code_first_Byte = 1;
            UCA0TXBUF = ACK_BYTE;
-           reprog_master_enable = 0; //Deshabilita reprogramación
-           bandera = 1;
+           update_Code_enable = 0; //Deshabilita reprogramación
         }else{//Si el primer byte no es el byte de inicio o el byte de fin, entonces es un dato.
-            first_byte = 0;
-            data[count_reprog_data] = start_byte_received;
-            count_reprog_data++;
-            //UCA0TXBUF = NACK_BYTE; //Dato a enviar (pag.791) manual slau367p.pdf
-            //reprog_master_enable = 0; //Deshabilita reprogramación
-
+            update_Code_first_Byte = 0;
+            update_Code_Buffer[update_Code_Byte_Count] = start_byte_received;
+            update_Code_Byte_Count++;
         }
     }else{
-        data[count_reprog_data] = UCA0RXBUF;
-        count_reprog_data++;
-        //P1OUT ^= BIT0;
-
-        if(count_reprog_data == 4 + data[0]){
-            count_reprog_data = 0;
-            reprog_frame_ready = 1;
-            first_byte = 1;
+        update_Code_Buffer[update_Code_Byte_Count] = UCA0RXBUF;
+        update_Code_Byte_Count++;
+        if(update_Code_Byte_Count == 4 + update_Code_Buffer[0]){
+            update_Code_Byte_Count = 0;
+            update_Code_frame_ready = 1;
+            update_Code_first_Byte = 1;
         }
     }
-}
-
-
-#pragma vector = PORT4_VECTOR
-__interrupt void PORT4_ISR(void){
-    P4IFG = 0; //limpia bandera de interrupcion
-    P1OUT ^= BIT0;
 }
